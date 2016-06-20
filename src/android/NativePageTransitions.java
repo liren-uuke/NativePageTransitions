@@ -115,7 +115,7 @@ public class NativePageTransitions extends CordovaPlugin {
     _callbackContext = callbackContext;
 
     if (ACTION_EXECUTE_PENDING_TRANSITION.equalsIgnoreCase(action)) {
-      delay = 0;
+      delay = 60;
       if (ACTION_SLIDE.equalsIgnoreCase(_action)) {
         doSlideTransition();
       } else if (ACTION_FADE.equalsIgnoreCase(_action)) {
