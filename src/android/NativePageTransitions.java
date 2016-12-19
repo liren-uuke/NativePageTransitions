@@ -38,6 +38,8 @@ public class NativePageTransitions extends CordovaPlugin {
   private ImageView imageView2;
   private ImageView fixedImageViewTop;
   private ImageView fixedImageViewBottom;
+  private ImageView splitImageViewTop;
+  private ImageView splitImageViewBottom;
   private float retinaFactor;
   private long duration;
   private long delay;
@@ -47,6 +49,8 @@ public class NativePageTransitions extends CordovaPlugin {
   private String backgroundColor;
   private int slowdownfactor;
   private int slidePixels;
+  private int splitPixels;
+  private String splitAction;
   private int fixedPixelsTop;
   private int fixedPixelsBottom;
   private CallbackContext _callbackContext;
@@ -164,6 +168,22 @@ public class NativePageTransitions extends CordovaPlugin {
       cordova.getActivity().runOnUiThread(new Runnable() {
         @Override
         public void run() {
+          if(direction.equalsIgnoreCase("splitVertical")){
+            try {
+              if (!json.isNull("splitPixel")) {
+                splitPixels = json.getInt("splitPixel");
+              }
+              if (!json.isNull("action")) {
+                splitAction = json.getString("action");
+              } else {
+                splitAction = "open";
+              }
+            }catch (Throwable e){
+
+            }
+            split(href);
+            return;
+          }
           Bitmap bitmap = getBitmap();
           imageView.setImageBitmap(bitmap);
           bringToFront(imageView);
@@ -460,6 +480,11 @@ public class NativePageTransitions extends CordovaPlugin {
   }
 
   private void doSlideTransition() {
+
+    if(direction.equalsIgnoreCase("splitVertical")){
+      doSplitTransition();
+      return;
+    }
     if (!calledFromJS || this._callbackContext.getCallbackId().equals(lastCallbackID)) {
       return;
     }
@@ -760,5 +785,221 @@ public class NativePageTransitions extends CordovaPlugin {
         getView().setLayerType(View.LAYER_TYPE_SOFTWARE, null);
       }
     }
+  }
+  private void split(String href){
+    Bitmap bitmap = getBitmap();
+    if (bitmap != null) {
+      if (!"close".equalsIgnoreCase(splitAction)) {
+        int cropHeight = (int) (splitPixels * retinaFactor);
+        splitImageViewTop = new ImageView(cordova.getActivity().getBaseContext());
+        splitImageViewTop.setImageBitmap(Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(), cropHeight));
+        final FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP);
+        layout.addView(splitImageViewTop, lp);
+        splitImageViewBottom = new ImageView(cordova.getActivity().getBaseContext());
+        splitImageViewBottom.setImageBitmap(Bitmap.createBitmap(bitmap, 0, cropHeight, bitmap.getWidth(), bitmap.getHeight() - cropHeight));
+        final FrameLayout.LayoutParams lpBottom = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+        layout.addView(splitImageViewBottom, lpBottom);
+        bringToFront(getView());
+        bringToFront(splitImageViewBottom);
+        bringToFront(splitImageViewTop);
+      }
+      else {
+
+        imageView.setImageBitmap(bitmap);
+        bringToFront(imageView);
+        //bringToFront(getView());
+      }
+    }
+    if (href != null && !"null".equals(href)) {
+      if (!href.startsWith("#")) {
+        webView.loadUrlIntoView(webView.getUrl().substring(0, webView.getUrl().lastIndexOf('/')+1) + href, false);
+      }
+    }
+
+    if (delay > -1) {
+      doSplitTransition();
+    } else {
+      _callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.OK));
+    }
+  }
+  private void  doSplitTransition(){
+    if (!calledFromJS || this._callbackContext.getCallbackId().equals(lastCallbackID)) {
+      return;
+    }
+    lastCallbackID = this._callbackContext.getCallbackId();
+
+    new Timer().schedule(new TimerTask() {
+      public void run() {
+        // manipulations of the imageView need to be done by the same thread
+        // as the one that created it - the uithread in this case
+        cordova.getActivity().runOnUiThread(new Runnable() {
+          @Override
+          public void run() {
+
+            int translateType = TranslateAnimation.ABSOLUTE;
+            if (!"close".equalsIgnoreCase(splitAction)) {
+
+              // topImage animation
+              final AnimationSet topImageViewAnimationSet = new AnimationSet(true);
+              final Animation topImageViewAnimation = new TranslateAnimation(
+                      translateType, 0f,
+                      translateType, 0f,
+                      translateType, 0,
+                      translateType, -splitPixels * retinaFactor);
+              topImageViewAnimationSet.setDuration(duration);
+              topImageViewAnimationSet.addAnimation(topImageViewAnimation);
+              // bottomImage animation
+              final AnimationSet bottomImageViewAnimationSet = new AnimationSet(true);
+              final Animation bottomImageViewAnimation = new TranslateAnimation(
+                      translateType, 0f,
+                      translateType, 0f,
+                      translateType, 0f,
+                      translateType, splitImageViewBottom.getHeight());
+              bottomImageViewAnimationSet.setDuration(duration);
+              bottomImageViewAnimationSet.addAnimation(bottomImageViewAnimation);
+
+              // webview animation
+              final AnimationSet webViewAnimationSet = new AnimationSet(true);
+
+              final Animation webViewAnimation1 = new TranslateAnimation(
+                      translateType, 0,
+                      translateType, 0,
+                      translateType, splitPixels * retinaFactor * 0.5f,
+                      translateType, 0);
+              webViewAnimation1.setDuration(duration);
+              webViewAnimationSet.addAnimation(webViewAnimation1);
+
+              webViewAnimationSet.setAnimationListener(new Animation.AnimationListener() {
+                @Override
+                public void onAnimationStart(Animation animation) {
+                }
+
+                @Override
+                public void onAnimationEnd(Animation animation) {
+
+                  new Timer().schedule(new TimerTask() {
+                    public void run() {
+                      cordova.getActivity().runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                          // prevent a flash by removing the optional fixed header/footer screenshots after a little delay
+                          bringToFront(getView());
+                          getView().clearAnimation();
+                          splitImageViewBottom.clearAnimation();
+                          splitImageViewTop.clearAnimation();
+                          layout.removeView(splitImageViewBottom);
+                          layout.removeView(splitImageViewTop);
+                          imageView.setImageBitmap(null);
+                        }
+                      });
+                    }
+                  }, 20);
+                  bringToFront(getView());
+                  _callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.OK));
+
+                }
+                @Override
+                public void onAnimationRepeat(Animation animation) {
+                }
+              });
+
+              splitImageViewTop.startAnimation(topImageViewAnimationSet);
+              splitImageViewBottom.startAnimation(bottomImageViewAnimationSet);
+              getView().startAnimation(webViewAnimationSet);
+            }
+            else {
+
+              splitPixels = splitImageViewTop.getHeight();
+              final FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP);
+              layout.addView(splitImageViewTop, lp);
+              final FrameLayout.LayoutParams lpBottom = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+              layout.addView(splitImageViewBottom, lpBottom);
+              bringToFront(splitImageViewBottom);
+              bringToFront(splitImageViewTop);
+              final AnimationSet topImageViewAnimationSet = new AnimationSet(true);
+              final Animation topImageViewAnimation = new TranslateAnimation(
+                      translateType, 0f,
+                      translateType, 0f,
+                      translateType, -splitPixels,
+                      translateType, 0);
+              topImageViewAnimationSet.setDuration(duration);
+              topImageViewAnimationSet.addAnimation(topImageViewAnimation);
+              // bottomImage animation
+              final AnimationSet bottomImageViewAnimationSet = new AnimationSet(true);
+              final Animation bottomImageViewAnimation = new TranslateAnimation(
+                      translateType, 0f,
+                      translateType, 0f,
+                      translateType, splitImageViewBottom.getHeight(),
+                      translateType, 0);
+              bottomImageViewAnimationSet.setDuration(duration);
+              bottomImageViewAnimationSet.addAnimation(bottomImageViewAnimation);
+
+              // webview animation
+              final AnimationSet webViewAnimationSet = new AnimationSet(true);
+
+              final Animation webViewAnimation1 = new TranslateAnimation(
+                      translateType, 0,
+                      translateType, 0,
+                      translateType, 0,
+                      translateType, splitPixels * 0.5f);
+              webViewAnimation1.setDuration(duration);
+              webViewAnimationSet.addAnimation(webViewAnimation1);
+
+              webViewAnimationSet.setAnimationListener(new Animation.AnimationListener() {
+                @Override
+                public void onAnimationStart(Animation animation) {
+                }
+
+                @Override
+                public void onAnimationEnd(Animation animation) {
+                  // prevent a flash by removing the optional fixed header/footer screenshots after a little dela
+                  new Timer().schedule(new TimerTask() {
+                    public void run() {
+                      cordova.getActivity().runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                          splitImageViewBottom.clearAnimation();
+                          splitImageViewTop.clearAnimation();
+                          layout.removeView(splitImageViewBottom);
+                          layout.removeView(splitImageViewTop);
+                          imageView.setImageBitmap(null);
+                          splitImageViewTop.setImageBitmap(null);
+                          splitImageViewBottom.setImageBitmap(null);
+                          bringToFront(getView());
+                          getView().clearAnimation();
+                        }
+                      });
+                    }
+                  }, 20);
+                  _callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.OK));
+                }
+
+                @Override
+                public void onAnimationRepeat(Animation animation) {
+                }
+              });
+
+              splitImageViewTop.startAnimation(topImageViewAnimationSet);
+              splitImageViewBottom.startAnimation(bottomImageViewAnimationSet);
+              imageView.startAnimation(webViewAnimationSet);
+            }
+            if (BEFORE_KITKAT) {
+              //fixes a problem where the animation didn't start unless the user touched the screen once
+              layout.invalidate();
+            }
+
+
+            if (BEFORE_KITKAT) {
+              // This fixes an issue observed on a Samsung Galaxy S3 /w Android 4.3 where the img is shown,
+              // but the transition doesn't kick in unless the screen is touched again.
+              // note that with 'layout.invalidate();' this may be obsolete but I can't reproduce the issue anyway
+              getView().requestFocus();
+            }
+
+            calledFromJS = false;
+          }
+        });
+      }
+    }, delay);
   }
 }

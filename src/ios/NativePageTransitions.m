@@ -85,6 +85,12 @@
   NSString *href = [args objectForKey:@"href"];
   NSNumber *fixedPixelsTopNum = [args objectForKey:@"fixedPixelsTop"];
   NSNumber *fixedPixelsBottomNum = [args objectForKey:@"fixedPixelsBottom"];
+  
+  if([direction isEqualToString:@"splitVertical"]){
+    [self split];
+    return;
+  }
+
   int fixedPixelsTop = [fixedPixelsTopNum intValue];
   int fixedPixelsBottom = [fixedPixelsBottomNum intValue];
 
@@ -160,6 +166,11 @@
 
 - (void) performSlideTransition {
   NSMutableDictionary *args = _slideOptions;
+  NSString *direction = [args objectForKey:@"direction"];
+  if([direction isEqualToString:@"splitVertical"]){
+    [self performSplitTransition];
+    return;
+  }
   _slideOptions = nil;
   NSTimeInterval duration = [[args objectForKey:@"duration"] doubleValue];
   // duration/delay is passed in ms, but needs to be in sec here
@@ -174,7 +185,6 @@
     NSNumber *slidePixelsNum = [args objectForKey:@"slidePixels"];
     int slidePixels = [slidePixelsNum intValue];
 
-  NSString *direction = [args objectForKey:@"direction"];
   NSNumber *slowdownfactor = [args objectForKey:@"slowdownfactor"];
 
   NSNumber *fixedPixelsTopNum = [args objectForKey:@"fixedPixelsTop"];
@@ -798,5 +808,145 @@
     }
   }
   return YES;
+}
+- (void) split{
+  NSMutableDictionary *args = [_command.arguments objectAtIndex:0];
+  NSString *href = [args objectForKey:@"href"];
+  NSString *action = [args objectForKey:@"action"];//open or close
+  NSNumber *splitPixelNum = [args objectForKey:@"splitPixel"];
+  int splitPixel = [splitPixelNum intValue];
+  
+  UIImage *image =[self grabScreenshot];
+  if(![action isEqualToString:@"close"]){
+    CGFloat retinaFactor = DISPLAY_SCALE;
+    CGRect rect = CGRectMake(0.0f, _nonWebViewHeight*retinaFactor, image.size.width*retinaFactor, (splitPixel+_nonWebViewHeight)*retinaFactor);
+    CGRect rect2 = CGRectMake(0.0f, _nonWebViewHeight, image.size.width, splitPixel+_nonWebViewHeight);
+    CGImageRef tempImage = CGImageCreateWithImageInRect([image CGImage], rect);
+    _screenShotImageViewTop = [[UIImageView alloc]initWithFrame:rect2];
+    [_screenShotImageViewTop setImage:[UIImage imageWithCGImage:tempImage]];
+    CGImageRelease(tempImage);
+    
+    rect = CGRectMake(0.0f, (_nonWebViewHeight+splitPixel)*retinaFactor, image.size.width*retinaFactor, (image.size.height-splitPixel-_nonWebViewHeight)*retinaFactor);
+    rect2 = CGRectMake(0.0f, splitPixel+_nonWebViewHeight, image.size.width, image.size.height-splitPixel-_nonWebViewHeight);
+    tempImage = CGImageCreateWithImageInRect([image CGImage], rect);
+    _screenShotImageViewBottom = [[UIImageView alloc]initWithFrame:rect2];
+    [_screenShotImageViewBottom setImage:[UIImage imageWithCGImage:tempImage]];
+    CGImageRelease(tempImage);
+    [self.transitionView.superview insertSubview:_screenShotImageViewTop aboveSubview:self.transitionView];
+    [self.transitionView.superview insertSubview:_screenShotImageViewBottom aboveSubview:self.transitionView];
+  }else {
+    CGFloat width = self.viewController.view.frame.size.width;
+    CGFloat height = self.viewController.view.frame.size.height;
+    [_screenShotImageView setFrame:CGRectMake(0, 0, width, height)];
+    
+    _screenShotImageView = [[UIImageView alloc]initWithFrame:[self.viewController.view.window frame]];
+    [_screenShotImageView setImage:image];
+    
+    [self.transitionView.superview insertSubview:_screenShotImageView aboveSubview:self.transitionView];
+    
+    [self.transitionView.superview insertSubview:_screenShotImageViewTop aboveSubview:_screenShotImageView];
+    [self.transitionView.superview insertSubview:_screenShotImageViewBottom aboveSubview:_screenShotImageView];
+  }
+  //[self.transitionView.superview bringSubviewToFront:self.transitionView];
+  if ([self loadHrefIfPassed:href]) {
+    // pass in -1 for manual (requires you to call executePendingTransition)
+    NSTimeInterval delay = [[args objectForKey:@"iosdelay"] doubleValue];
+    _slideOptions = args;
+    if (delay < 0) {
+      CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:_command.callbackId];
+    } else {
+      [self performSplitTransition];
+    }
+  }
+}
+- (void) performSplitTransition {
+  NSMutableDictionary *args = _slideOptions;
+  _slideOptions = nil;
+  NSTimeInterval duration = [[args objectForKey:@"duration"] doubleValue];
+  // duration/delay is passed in ms, but needs to be in sec here
+  NSTimeInterval delay = [[args objectForKey:@"iosdelay"] doubleValue]; // pass in -1 for manual (requires you to call executePendingTransition)
+  if (delay < 0) {
+    delay = 0;
+  }
+  delay = delay / 1000;
+  NSNumber *splitPixelNum = [args objectForKey:@"splitPixel"];
+  int splitPixel = [splitPixelNum intValue];
+  
+  CGFloat webviewFromY = _nonWebViewHeight;
+  CGFloat webviewToY = _nonWebViewHeight;
+  
+  
+  CGFloat width = self.viewController.view.frame.size.width;
+  CGFloat height = self.viewController.view.frame.size.height;
+  
+  // correct landscape detection on iOS < 8
+  BOOL isLandscape = UIInterfaceOrientationIsLandscape([UIApplication sharedApplication].statusBarOrientation);
+  if (isLandscape && width < height) {
+    CGFloat temp = width;
+    width = height;
+    height = temp;
+  }
+  duration = duration/1000.0f;
+  NSString *action = [args objectForKey:@"action"];//open or close
+  if(![action isEqualToString:@"close"]){
+    webviewToY = _nonWebViewHeight;
+    webviewFromY = splitPixel*0.5f+_nonWebViewHeight;
+    [self.transitionView setFrame:CGRectMake(0,webviewFromY, width, height-_nonWebViewHeight)];
+    [self.transitionView setAlpha:1.0f];
+    
+    [UIView animateWithDuration:duration
+                          delay:delay
+                        options:UIViewAnimationOptionCurveEaseInOut
+                     animations:^{
+                      
+                       [self.transitionView setFrame:CGRectMake(0, webviewToY, width, height-_nonWebViewHeight)];
+                       [_screenShotImageViewTop setFrame:CGRectMake(0, -splitPixel,width, splitPixel)];
+                       [_screenShotImageViewBottom setFrame:CGRectMake(0, height, width, height-splitPixel)];
+      
+                       
+                     }
+                     completion:^(BOOL finished) {
+                       if (_originalColor != nil) {
+                         self.viewController.view.backgroundColor = _originalColor;
+                       }
+                       CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+                       [self.commandDelegate sendPluginResult:pluginResult callbackId:_command.callbackId];
+                     }];
+  }else{
+    CGFloat retinaFactor = DISPLAY_SCALE;
+    
+    if(_screenShotImageViewTop != nil){
+      splitPixel = _screenShotImageViewTop.image.size.height/retinaFactor;
+    }
+    webviewToY = splitPixel+_nonWebViewHeight;
+    webviewFromY = _nonWebViewHeight;
+    CGFloat screenshotToY = splitPixel*0.5f+_nonWebViewHeight;
+    [_screenShotImageViewTop setFrame:CGRectMake(0, _nonWebViewHeight-splitPixel,width, splitPixel)];
+    [_screenShotImageViewBottom setFrame:CGRectMake(0, height, width, height-_nonWebViewHeight-splitPixel)];
+    [_screenShotImageView setFrame:CGRectMake(0, webviewFromY, width, height-_nonWebViewHeight)];
+    [self.transitionView setFrame:CGRectMake(0, webviewFromY, width, height-_nonWebViewHeight)];
+    
+    [UIView animateWithDuration:duration
+                          delay:delay
+                        options:UIViewAnimationOptionCurveEaseInOut
+                     animations:^{
+                       [_screenShotImageViewTop setFrame:CGRectMake(0, _nonWebViewHeight,width, splitPixel)];
+                       [_screenShotImageViewBottom setFrame:CGRectMake(0, webviewToY, width, height-splitPixel)];
+                       [_screenShotImageView setFrame:CGRectMake(0, screenshotToY, width, height-_nonWebViewHeight)];
+                     }
+                     completion:^(BOOL finished) {
+                       // doesn't matter if these weren't added
+                       [_screenShotImageViewTop removeFromSuperview];
+                       [_screenShotImageViewBottom removeFromSuperview];
+                       [_screenShotImageView removeFromSuperview];
+                       if (_originalColor != nil) {
+                         self.viewController.view.backgroundColor = _originalColor;
+                       }
+                       CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+                       [self.commandDelegate sendPluginResult:pluginResult callbackId:_command.callbackId];
+                     }];
+    
+  }
 }
 @end
